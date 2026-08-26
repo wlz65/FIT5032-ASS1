@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 
 const learningResources = [
   {
@@ -29,6 +29,11 @@ const resourceCount = computed(() => learningResources.length)
 
 const audienceCount = computed(() => {
   return new Set(learningResources.map((resource) => resource.audience)).size
+})
+
+const interestForm = reactive({
+  fullName: '',
+  emailAddress: '',
 })
 </script>
 
@@ -60,7 +65,7 @@ const audienceCount = computed(() => {
             <p class="section-kicker">Climate literacy hub</p>
             <h2 class="display-title">Learn climate action in a local way</h2>
             <p class="intro-copy">
-              ClimateWise Melbourne supports students, teachers, and community members with
+              ClimateWise Mel supports students, teachers, and community members with
               beginner-friendly resources about climate change, sustainability, and local action.
               This version focuses only on the required A and B features.
             </p>
@@ -110,6 +115,39 @@ const audienceCount = computed(() => {
               </div>
             </div>
           </section>
+        </div>
+      </div>
+
+      <div class="row g-4 mt-1">
+        <div class="col-12 col-lg-7">
+          <form class="form-panel">
+            <div class="section-heading">
+              <p class="section-kicker">Community interest form</p>
+              <h2 class="h4 fw-bold mb-0">Save learning interest</h2>
+            </div>
+
+            <div class="mb-3">
+              <label for="fullName" class="form-label">Full name</label>
+              <input
+                id="fullName"
+                v-model="interestForm.fullName"
+                class="form-control"
+                type="text"
+                placeholder="e.g. Mia Chen"
+              >
+            </div>
+
+            <div class="mb-0">
+              <label for="emailAddress" class="form-label">Email address</label>
+              <input
+                id="emailAddress"
+                v-model="interestForm.emailAddress"
+                class="form-control"
+                type="email"
+                placeholder="name@example.com"
+              >
+            </div>
+          </form>
         </div>
       </div>
     </section>

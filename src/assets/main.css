@@ -49,7 +49,8 @@ textarea {
 }
 
 .intro-panel,
-.content-panel {
+.content-panel,
+.form-panel {
   border: 1px solid #d9e5dc;
   border-radius: 8px;
   background: #ffffff;
@@ -57,7 +58,8 @@ textarea {
 }
 
 .intro-panel,
-.content-panel {
+.content-panel,
+.form-panel {
   padding: 1.25rem;
 }
 
@@ -143,13 +145,29 @@ textarea {
   margin-bottom: 0.65rem;
 }
 
+.form-label {
+  color: #243a32;
+  font-weight: 700;
+}
+
+.form-control {
+  border-color: #c8d8ce;
+  border-radius: 8px;
+}
+
+.form-control:focus {
+  border-color: #2f7356;
+  box-shadow: 0 0 0 0.2rem rgba(47, 115, 86, 0.16);
+}
+
 @media (max-width: 575.98px) {
   .display-title {
     font-size: 1.8rem;
   }
 
   .intro-panel,
-  .content-panel {
+  .content-panel,
+  .form-panel {
     padding: 1rem;
   }
 }
