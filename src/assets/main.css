@@ -155,9 +155,29 @@ textarea {
   border-radius: 8px;
 }
 
-.form-control:focus {
+.form-select {
+  border-color: #c8d8ce;
+  border-radius: 8px;
+}
+
+.form-control:focus,
+.form-select:focus {
   border-color: #2f7356;
   box-shadow: 0 0 0 0.2rem rgba(47, 115, 86, 0.16);
+}
+
+.btn-climate {
+  border-color: #2f7356;
+  background: #2f7356;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.btn-climate:hover,
+.btn-climate:focus {
+  border-color: #245c44;
+  background: #245c44;
+  color: #ffffff;
 }
 
 @media (max-width: 575.98px) {

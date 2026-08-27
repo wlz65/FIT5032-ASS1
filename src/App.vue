@@ -31,10 +31,32 @@ const audienceCount = computed(() => {
   return new Set(learningResources.map((resource) => resource.audience)).size
 })
 
+const topics = [
+  'Climate basics',
+  'Local impacts',
+  'Sustainability choices',
+  'Community action',
+]
+
 const interestForm = reactive({
   fullName: '',
   emailAddress: '',
+  postcode: '',
+  topic: topics[0],
+  learningGoal: '',
 })
+
+function saveInterest() {
+  // Save behaviour will be completed in the next step.
+}
+
+function resetInterestForm() {
+  interestForm.fullName = ''
+  interestForm.emailAddress = ''
+  interestForm.postcode = ''
+  interestForm.topic = topics[0]
+  interestForm.learningGoal = ''
+}
 </script>
 
 <template>
@@ -46,13 +68,13 @@ const interestForm = reactive({
             <div class="brand-mark" aria-hidden="true">CW</div>
             <div>
               <p class="small text-uppercase fw-bold text-teal mb-1">
-                Version 1 - BR A and B 
+                Version 1 
               </p>
               <h1 class="h3 fw-bold mb-0">ClimateWise Melbourne</h1>
             </div>
           </div>
           <div class="header-note">
-            A basic Vue application for the Assignment 1 A and B requirements.
+            A basic Vue application for the Assignment 1.
           </div>
         </div>
       </div>
@@ -67,7 +89,6 @@ const interestForm = reactive({
             <p class="intro-copy">
               ClimateWise Mel supports students, teachers, and community members with
               beginner-friendly resources about climate change, sustainability, and local action.
-              This version focuses only on the required A and B features.
             </p>
 
             <img
@@ -119,8 +140,8 @@ const interestForm = reactive({
       </div>
 
       <div class="row g-4 mt-1">
-        <div class="col-12 col-lg-7">
-          <form class="form-panel">
+        <div class="col-12">
+          <form class="form-panel" @submit.prevent="saveInterest">
             <div class="section-heading">
               <p class="section-kicker">Community interest form</p>
               <h2 class="h4 fw-bold mb-0">Save learning interest</h2>
@@ -137,7 +158,7 @@ const interestForm = reactive({
               >
             </div>
 
-            <div class="mb-0">
+            <div class="mb-3">
               <label for="emailAddress" class="form-label">Email address</label>
               <input
                 id="emailAddress"
@@ -146,6 +167,50 @@ const interestForm = reactive({
                 type="email"
                 placeholder="name@example.com"
               >
+            </div>
+
+            <div class="row g-3">
+              <div class="col-12 col-md-5">
+                <label for="postcode" class="form-label">Postcode</label>
+                <input
+                  id="postcode"
+                  v-model="interestForm.postcode"
+                  class="form-control"
+                  inputmode="numeric"
+                  placeholder="3000"
+                >
+              </div>
+
+              <div class="col-12 col-md-7">
+                <label for="topic" class="form-label">Topic interest</label>
+                <select id="topic" v-model="interestForm.topic" class="form-select">
+                  <option v-for="topic in topics" :key="topic">
+                    {{ topic }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <label for="learningGoal" class="form-label">Learning goal</label>
+              <textarea
+                id="learningGoal"
+                v-model="interestForm.learningGoal"
+                class="form-control"
+                rows="4"
+                placeholder="e.g. I want to learn simple actions for my school."
+              ></textarea>
+            </div>
+
+            <div class="d-grid d-sm-flex gap-2 mt-4">
+              <button class="btn btn-climate px-4" type="submit">Save interest</button>
+              <button
+                class="btn btn-outline-secondary px-4"
+                type="button"
+                @click="resetInterestForm"
+              >
+                Reset
+              </button>
             </div>
           </form>
         </div>
