@@ -2,6 +2,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 const STORAGE_KEY = 'climatewise-learning-interests'
+const USERS_STORAGE_KEY = 'climatewise-users'
+const CURRENT_USER_STORAGE_KEY = 'climatewise-current-user'
+const MIN_PASSWORD_LENGTH = 6
 
 const learningResources = [
   {
@@ -40,6 +43,26 @@ const topics = [
   'Community action',
 ]
 
+const registeredUsers = ref([])
+const currentUser = ref(null)
+const authMode = ref('login')
+const registerAttempted = ref(false)
+const loginAttempted = ref(false)
+const registerSuccessMessage = ref('')
+const loginErrorMessage = ref('')
+
+const registerForm = reactive({
+  fullName: '',
+  emailAddress: '',
+  password: '',
+  confirmPassword: '',
+})
+
+const loginForm = reactive({
+  emailAddress: '',
+  password: '',
+})
+
 const interestForm = reactive({
   fullName: '',
   emailAddress: '',
@@ -60,6 +83,61 @@ const submitAttempted = ref(false)
 const savedInterests = ref([])
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const postcodePattern = /^\d{4}$/
+
+const registerErrors = computed(() => {
+  const errors = {}
+  const fullName = registerForm.fullName.trim()
+  const emailAddress = normalizeEmail(registerForm.emailAddress)
+  const password = registerForm.password
+  const confirmPassword = registerForm.confirmPassword
+
+  if (!fullName) {
+    errors.fullName = 'Full name is required.'
+  }
+
+  if (!emailAddress) {
+    errors.emailAddress = 'Email address is required.'
+  } else if (!emailPattern.test(emailAddress)) {
+    errors.emailAddress = 'Enter a valid email address.'
+  } else if (registeredUsers.value.some((user) => user.emailAddress === emailAddress)) {
+    errors.emailAddress = 'This email is already registered.'
+  }
+
+  if (!password) {
+    errors.password = 'Password is required.'
+  } else if (password.length < MIN_PASSWORD_LENGTH) {
+    errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+  }
+
+  if (!confirmPassword) {
+    errors.confirmPassword = 'Confirm your password.'
+  } else if (confirmPassword !== password) {
+    errors.confirmPassword = 'Passwords must match.'
+  }
+
+  return errors
+})
+
+const loginErrors = computed(() => {
+  const errors = {}
+  const emailAddress = normalizeEmail(loginForm.emailAddress)
+
+  if (!emailAddress) {
+    errors.emailAddress = 'Email address is required.'
+  } else if (!emailPattern.test(emailAddress)) {
+    errors.emailAddress = 'Enter a valid email address.'
+  }
+
+  if (!loginForm.password) {
+    errors.password = 'Password is required.'
+  }
+
+  return errors
+})
+
+const registerFormIsValid = computed(() => Object.keys(registerErrors.value).length === 0)
+
+const loginFormIsValid = computed(() => Object.keys(loginErrors.value).length === 0)
 
 const formErrors = computed(() => {
   const errors = {}
@@ -102,6 +180,80 @@ const formIsValid = computed(() => Object.keys(formErrors.value).length === 0)
 const savedInterestCount = computed(() => savedInterests.value.length)
 
 onMounted(() => {
+  loadUsers()
+  loadCurrentUser()
+  loadSavedInterests()
+})
+
+watch(
+  registeredUsers,
+  (users) => {
+    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
+  },
+  { deep: true },
+)
+
+watch(
+  currentUser,
+  (user) => {
+    if (user) {
+      localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user))
+      return
+    }
+
+    localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+  },
+  { deep: true },
+)
+
+watch(
+  savedInterests,
+  (records) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
+  },
+  { deep: true },
+)
+
+function loadUsers() {
+  const storedUsers = localStorage.getItem(USERS_STORAGE_KEY)
+
+  if (!storedUsers) {
+    return
+  }
+
+  try {
+    const parsedUsers = JSON.parse(storedUsers)
+
+    if (Array.isArray(parsedUsers)) {
+      registeredUsers.value = parsedUsers
+    }
+  } catch {
+    localStorage.removeItem(USERS_STORAGE_KEY)
+  }
+}
+
+function loadCurrentUser() {
+  const storedUser = localStorage.getItem(CURRENT_USER_STORAGE_KEY)
+
+  if (!storedUser) {
+    return
+  }
+
+  try {
+    const parsedUser = JSON.parse(storedUser)
+    const matchingUser = registeredUsers.value.find((user) => user.id === parsedUser.id)
+
+    if (matchingUser) {
+      currentUser.value = matchingUser
+    } else {
+      localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+    }
+  } catch {
+    localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+  }
+}
+
+function loadSavedInterests() {
   const storedInterests = localStorage.getItem(STORAGE_KEY)
 
   if (!storedInterests) {
@@ -117,15 +269,98 @@ onMounted(() => {
   } catch {
     localStorage.removeItem(STORAGE_KEY)
   }
-})
+}
 
-watch(
-  savedInterests,
-  (records) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
-  },
-  { deep: true },
-)
+function normalizeEmail(emailAddress) {
+  return emailAddress.trim().toLowerCase()
+}
+
+function formattedDate() {
+  return new Date().toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function switchAuthMode(mode) {
+  authMode.value = mode
+  registerAttempted.value = false
+  loginAttempted.value = false
+  loginErrorMessage.value = ''
+
+  if (mode === 'register') {
+    registerSuccessMessage.value = ''
+  }
+}
+
+function registerUser() {
+  registerAttempted.value = true
+  registerSuccessMessage.value = ''
+  loginErrorMessage.value = ''
+
+  if (!registerFormIsValid.value) {
+    return
+  }
+
+  const newUser = {
+    id: Date.now(),
+    fullName: registerForm.fullName.trim(),
+    emailAddress: normalizeEmail(registerForm.emailAddress),
+    password: registerForm.password,
+    createdAt: formattedDate(),
+  }
+
+  registeredUsers.value.unshift(newUser)
+  loginForm.emailAddress = newUser.emailAddress
+  loginForm.password = ''
+  registerSuccessMessage.value = 'Account created. You can now log in.'
+  resetRegisterForm()
+  authMode.value = 'login'
+}
+
+function loginUser() {
+  loginAttempted.value = true
+  loginErrorMessage.value = ''
+
+  if (!loginFormIsValid.value) {
+    return
+  }
+
+  const emailAddress = normalizeEmail(loginForm.emailAddress)
+  const matchedUser = registeredUsers.value.find((user) => {
+    return user.emailAddress === emailAddress && user.password === loginForm.password
+  })
+
+  if (!matchedUser) {
+    loginErrorMessage.value = 'Email or password is incorrect.'
+    return
+  }
+
+  currentUser.value = matchedUser
+  registerSuccessMessage.value = ''
+  resetLoginForm()
+}
+
+function logoutUser() {
+  currentUser.value = null
+  authMode.value = 'login'
+}
+
+function resetRegisterForm() {
+  registerForm.fullName = ''
+  registerForm.emailAddress = ''
+  registerForm.password = ''
+  registerForm.confirmPassword = ''
+  registerAttempted.value = false
+}
+
+function resetLoginForm() {
+  loginForm.emailAddress = ''
+  loginForm.password = ''
+  loginAttempted.value = false
+  loginErrorMessage.value = ''
+}
 
 function markTouched(field) {
   touched[field] = true
@@ -160,11 +395,7 @@ function saveInterest() {
     postcode: interestForm.postcode.trim(),
     topic: interestForm.topic,
     learningGoal: interestForm.learningGoal.trim(),
-    savedAt: new Date().toLocaleDateString('en-AU', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    }),
+    savedAt: formattedDate(),
   })
 
   resetInterestForm()
@@ -188,22 +419,225 @@ function clearSavedInterests() {
 </script>
 
 <template>
-  <main class="app-shell">
+  <main v-if="!currentUser" class="auth-shell">
+    <section class="container py-4 py-lg-5">
+      <div class="auth-layout">
+        <section class="auth-intro">
+          <div class="brand-mark mb-3" aria-hidden="true">CW</div>
+          <p class="section-kicker">ClimateWise Melbourne</p>
+          <h1 class="display-title">Sign in to access the learning hub</h1>
+          <p class="intro-copy">
+            Register a local account or log in to continue to the existing ClimateWise
+            Melbourne application.
+          </p>
+
+          <div class="auth-points">
+            <div>
+              <span>Multiple users</span>
+              <strong>{{ registeredUsers.length }}</strong>
+            </div>
+            <div>
+              <span>Local records</span>
+              <strong>{{ savedInterestCount }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="auth-card">
+          <div class="auth-tabs" role="tablist" aria-label="Authentication options">
+            <button
+              class="auth-tab"
+              :class="{ active: authMode === 'login' }"
+              type="button"
+              @click="switchAuthMode('login')"
+            >
+              Login
+            </button>
+            <button
+              class="auth-tab"
+              :class="{ active: authMode === 'register' }"
+              type="button"
+              @click="switchAuthMode('register')"
+            >
+              Register
+            </button>
+          </div>
+
+          <form v-if="authMode === 'login'" novalidate @submit.prevent="loginUser">
+            <div class="section-heading">
+              <p class="section-kicker">Welcome back</p>
+              <h2 class="h4 fw-bold mb-0">Login</h2>
+            </div>
+
+            <div v-if="registerSuccessMessage" class="auth-alert success">
+              {{ registerSuccessMessage }}
+            </div>
+
+            <div v-if="loginErrorMessage" class="auth-alert error">
+              {{ loginErrorMessage }}
+            </div>
+
+            <div class="mb-3">
+              <label for="loginEmailAddress" class="form-label">Email address</label>
+              <input
+                id="loginEmailAddress"
+                v-model="loginForm.emailAddress"
+                class="form-control"
+                :class="{ 'is-invalid': loginAttempted && Boolean(loginErrors.emailAddress) }"
+                type="email"
+                placeholder="name@example.com"
+                required
+                :aria-invalid="loginAttempted && Boolean(loginErrors.emailAddress)"
+                aria-describedby="loginEmailAddressFeedback"
+              >
+              <div id="loginEmailAddressFeedback" class="invalid-feedback">
+                {{ loginErrors.emailAddress }}
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label for="loginPassword" class="form-label">Password</label>
+              <input
+                id="loginPassword"
+                v-model="loginForm.password"
+                class="form-control"
+                :class="{ 'is-invalid': loginAttempted && Boolean(loginErrors.password) }"
+                type="password"
+                placeholder="Enter your password"
+                required
+                :aria-invalid="loginAttempted && Boolean(loginErrors.password)"
+                aria-describedby="loginPasswordFeedback"
+              >
+              <div id="loginPasswordFeedback" class="invalid-feedback">
+                {{ loginErrors.password }}
+              </div>
+            </div>
+
+            <div class="d-grid gap-2">
+              <button class="btn btn-climate px-4" type="submit">Login</button>
+              <button class="btn btn-outline-secondary px-4" type="button" @click="resetLoginForm">
+                Reset
+              </button>
+            </div>
+          </form>
+
+          <form v-else novalidate @submit.prevent="registerUser">
+            <div class="section-heading">
+              <p class="section-kicker">New account</p>
+              <h2 class="h4 fw-bold mb-0">Register</h2>
+            </div>
+
+            <div class="mb-3">
+              <label for="registerFullName" class="form-label">Full name</label>
+              <input
+                id="registerFullName"
+                v-model="registerForm.fullName"
+                class="form-control"
+                :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.fullName) }"
+                type="text"
+                placeholder="e.g. Mia Chen"
+                required
+                :aria-invalid="registerAttempted && Boolean(registerErrors.fullName)"
+                aria-describedby="registerFullNameFeedback"
+              >
+              <div id="registerFullNameFeedback" class="invalid-feedback">
+                {{ registerErrors.fullName }}
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="registerEmailAddress" class="form-label">Email address</label>
+              <input
+                id="registerEmailAddress"
+                v-model="registerForm.emailAddress"
+                class="form-control"
+                :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.emailAddress) }"
+                type="email"
+                placeholder="name@example.com"
+                required
+                :aria-invalid="registerAttempted && Boolean(registerErrors.emailAddress)"
+                aria-describedby="registerEmailAddressFeedback"
+              >
+              <div id="registerEmailAddressFeedback" class="invalid-feedback">
+                {{ registerErrors.emailAddress }}
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="registerPassword" class="form-label">Password</label>
+              <input
+                id="registerPassword"
+                v-model="registerForm.password"
+                class="form-control"
+                :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.password) }"
+                type="password"
+                placeholder="At least 6 characters"
+                required
+                :aria-invalid="registerAttempted && Boolean(registerErrors.password)"
+                aria-describedby="registerPasswordFeedback"
+              >
+              <div id="registerPasswordFeedback" class="invalid-feedback">
+                {{ registerErrors.password }}
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label for="registerConfirmPassword" class="form-label">Confirm password</label>
+              <input
+                id="registerConfirmPassword"
+                v-model="registerForm.confirmPassword"
+                class="form-control"
+                :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.confirmPassword) }"
+                type="password"
+                placeholder="Repeat your password"
+                required
+                :aria-invalid="registerAttempted && Boolean(registerErrors.confirmPassword)"
+                aria-describedby="registerConfirmPasswordFeedback"
+              >
+              <div id="registerConfirmPasswordFeedback" class="invalid-feedback">
+                {{ registerErrors.confirmPassword }}
+              </div>
+            </div>
+
+            <div class="d-grid gap-2">
+              <button class="btn btn-climate px-4" type="submit">Create account</button>
+              <button
+                class="btn btn-outline-secondary px-4"
+                type="button"
+                @click="resetRegisterForm"
+              >
+                Reset
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <main v-else class="app-shell">
     <header class="site-header">
       <div class="container py-3">
-        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+        <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
           <div class="d-flex align-items-center gap-3">
             <div class="brand-mark" aria-hidden="true">CW</div>
             <div>
               <p class="small text-uppercase fw-bold text-teal mb-1">
-                Version 1 
+                Version 1
               </p>
               <h1 class="h3 fw-bold mb-0">ClimateWise Melbourne</h1>
             </div>
           </div>
-          <div class="header-note">
-            A basic Vue application for the Assignment 1.
-          </div>
+
+          <section class="account-strip" aria-label="Current user">
+            <div class="account-summary">
+              <span>Signed in as</span>
+              <strong>{{ currentUser.fullName }}</strong>
+            </div>
+            <button class="btn btn-climate btn-sm" type="button" @click="logoutUser">
+              Logout
+            </button>
+          </section>
         </div>
       </div>
     </header>

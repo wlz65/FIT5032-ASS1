@@ -48,6 +48,130 @@ textarea {
   font-size: 0.95rem;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  background: #eef5f1;
+}
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+.auth-intro,
+.auth-card {
+  border: 1px solid #d9e5dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(31, 57, 48, 0.08);
+}
+
+.auth-intro {
+  padding: 1.5rem;
+}
+
+.auth-card {
+  padding: 1.25rem;
+}
+
+.auth-points {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.auth-points div {
+  border: 1px solid #d7e3dc;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #f8fbf8;
+}
+
+.auth-points span {
+  display: block;
+  color: #50645a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.auth-points strong {
+  display: block;
+  color: #246a7c;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.auth-tab {
+  border: 1px solid #c8d8ce;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: #f8fbf8;
+  color: #385048;
+  font-weight: 800;
+}
+
+.auth-tab.active {
+  border-color: #2f7356;
+  background: #2f7356;
+  color: #ffffff;
+}
+
+.auth-alert {
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  font-weight: 700;
+}
+
+.auth-alert.success {
+  border: 1px solid #a5d8b2;
+  background: #eefaf0;
+  color: #24613a;
+}
+
+.auth-alert.error {
+  border: 1px solid #e1aa9e;
+  background: #fff3ef;
+  color: #913822;
+}
+
+.account-strip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.account-summary {
+  border: 1px solid #d7e3dc;
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  background: #f8fbf8;
+}
+
+.account-strip span {
+  display: block;
+  color: #50645a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.account-strip strong {
+  display: block;
+  color: #18362a;
+  line-height: 1.2;
+}
+
 .intro-panel,
 .content-panel,
 .form-panel,
@@ -238,6 +362,24 @@ textarea {
 @media (max-width: 575.98px) {
   .display-title {
     font-size: 1.8rem;
+  }
+
+  .auth-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-intro,
+  .auth-card {
+    padding: 1rem;
+  }
+
+  .auth-points {
+    grid-template-columns: 1fr;
+  }
+
+  .account-strip {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .intro-panel,
