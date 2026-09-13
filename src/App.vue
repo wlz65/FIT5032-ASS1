@@ -6,6 +6,7 @@ const USERS_STORAGE_KEY = 'climatewise-users'
 const CURRENT_USER_STORAGE_KEY = 'climatewise-current-user'
 const RATINGS_STORAGE_KEY = 'climatewise-ratings'
 const MIN_PASSWORD_LENGTH = 6
+const roles = ['member', 'admin']
 
 const learningResources = [
   {
@@ -60,6 +61,8 @@ const registerAttempted = ref(false)
 const loginAttempted = ref(false)
 const registerSuccessMessage = ref('')
 const loginErrorMessage = ref('')
+const authBusy = ref(true)
+const authReady = ref(false)
 
 const registerForm = reactive({
   fullName: '',
@@ -97,28 +100,22 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const postcodePattern = /^\d{4}$/
 
 const registerErrors = computed(() => {
-  const errors = {}
-  const fullName = registerForm.fullName.trim()
+  const errors = contactErrors(registerForm)
   const emailAddress = normalizeEmail(registerForm.emailAddress)
   const password = registerForm.password
   const confirmPassword = registerForm.confirmPassword
 
-  if (!fullName) {
-    errors.fullName = 'Full name is required.'
-  }
-
-  if (!emailAddress) {
-    errors.emailAddress = 'Email address is required.'
-  } else if (!emailPattern.test(emailAddress)) {
-    errors.emailAddress = 'Enter a valid email address.'
-  } else if (registeredUsers.value.some((user) => user.emailAddress === emailAddress)) {
+  if (registeredUsers.value.some((user) => user.emailAddress === emailAddress)) {
     errors.emailAddress = 'This email is already registered.'
   }
+  if (!roles.includes(registerForm.role)) errors.role = 'Choose Member or Admin.'
 
   if (!password) {
     errors.password = 'Password is required.'
   } else if (password.length < MIN_PASSWORD_LENGTH) {
     errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+  } else if (password.length > 128) {
+    errors.password = 'Use 128 characters or fewer.'
   }
 
   if (!confirmPassword) {
@@ -136,13 +133,14 @@ const loginErrors = computed(() => {
 
   if (!emailAddress) {
     errors.emailAddress = 'Email address is required.'
-  } else if (!emailPattern.test(emailAddress)) {
-    errors.emailAddress = 'Enter a valid email address.'
+  } else if (!validEmail(emailAddress)) {
+    errors.emailAddress = 'Enter a valid email address (up to 254 characters).'
   }
 
   if (!loginForm.password) {
     errors.password = 'Password is required.'
   }
+  if (!roles.includes(loginForm.role)) errors.role = 'Choose Member or Admin.'
 
   return errors
 })
@@ -152,21 +150,9 @@ const registerFormIsValid = computed(() => Object.keys(registerErrors.value).len
 const loginFormIsValid = computed(() => Object.keys(loginErrors.value).length === 0)
 
 const formErrors = computed(() => {
-  const errors = {}
-  const fullName = interestForm.fullName.trim()
-  const emailAddress = interestForm.emailAddress.trim()
+  const errors = contactErrors(interestForm)
   const postcode = interestForm.postcode.trim()
   const learningGoal = interestForm.learningGoal.trim()
-
-  if (!fullName) {
-    errors.fullName = 'Full name is required.'
-  }
-
-  if (!emailAddress) {
-    errors.emailAddress = 'Email address is required.'
-  } else if (!emailPattern.test(emailAddress)) {
-    errors.emailAddress = 'Enter a valid email address.'
-  }
 
   if (!postcode) {
     errors.postcode = 'Postcode is required.'
@@ -174,7 +160,7 @@ const formErrors = computed(() => {
     errors.postcode = 'Enter a 4-digit postcode.'
   }
 
-  if (!interestForm.topic) {
+  if (!topics.includes(interestForm.topic)) {
     errors.topic = 'Choose one topic interest.'
   }
 
@@ -182,6 +168,8 @@ const formErrors = computed(() => {
     errors.learningGoal = 'Learning goal is required.'
   } else if (learningGoal.length < 10) {
     errors.learningGoal = 'Write at least 10 characters.'
+  } else if (learningGoal.length > 500) {
+    errors.learningGoal = 'Use 500 characters or fewer.'
   }
 
   return errors
@@ -197,12 +185,19 @@ const visibleInterests = computed(() => {
 })
 const savedInterestCount = computed(() => visibleInterests.value.length)
 
-onMounted(() => {
-  loadUsers()
-  loadCurrentUser()
-  loadSavedInterests()
-  loadRatings()
+onMounted(async () => {
   window.addEventListener('hashchange', updatePage)
+  try {
+    await loadUsers()
+    loadSavedInterests()
+    loadRatings()
+    loadCurrentUser()
+    authReady.value = true
+  } catch {
+    loginErrorMessage.value = 'Unable to load accounts. Use HTTPS or localhost and allow browser storage, then reload.'
+  } finally {
+    authBusy.value = false
+  }
 })
 
 onUnmounted(() => window.removeEventListener('hashchange', updatePage))
@@ -221,27 +216,6 @@ watch(currentUser, () => {
 watch(ratings, (items) => localStorage.setItem(RATINGS_STORAGE_KEY, JSON.stringify(items)))
 
 watch(
-  registeredUsers,
-  (users) => {
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
-  },
-  { deep: true },
-)
-
-watch(
-  currentUser,
-  (user) => {
-    if (user) {
-      localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user))
-      return
-    }
-
-    localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
-  },
-  { deep: true },
-)
-
-watch(
   savedInterests,
   (records) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
@@ -249,24 +223,34 @@ watch(
   { deep: true },
 )
 
-function loadUsers() {
-  const storedUsers = localStorage.getItem(USERS_STORAGE_KEY)
-
-  if (!storedUsers) {
-    return
-  }
-
+function readList(key) {
+  const stored = localStorage.getItem(key)
   try {
-    const parsedUsers = JSON.parse(storedUsers)
-
-    if (Array.isArray(parsedUsers)) {
-      registeredUsers.value = parsedUsers.map((user) => ({ ...user,
-        role: user.role === 'admin' ? 'admin' : 'member',
-      }))
-    }
+    const items = JSON.parse(stored || '[]')
+    return Array.isArray(items) ? items : []
   } catch {
-    localStorage.removeItem(USERS_STORAGE_KEY)
+    return []
   }
+}
+
+async function loadUsers() {
+  const users = []
+  for (const user of readList(USERS_STORAGE_KEY)) {
+    if (!user || !Number.isSafeInteger(user.id) || !validText(user.fullName)
+      || !validEmail(user.emailAddress) || !roles.includes(user.role ?? 'member')) continue
+    let credentials
+    if (validText(user.salt, 32) && /^[a-f0-9]{32}$/.test(user.salt)
+      && validText(user.passwordHash, 64) && /^[a-f0-9]{64}$/.test(user.passwordHash)) {
+      credentials = { salt: user.salt, passwordHash: user.passwordHash }
+    } else if (typeof user.password === 'string' && user.password.length > 0) {
+      // Migrate C1 passwords before exposing accounts or writing them back to storage.
+      credentials = await hashPassword(user.password)
+    } else continue
+    users.push({ id: user.id, fullName: user.fullName, emailAddress: normalizeEmail(user.emailAddress),
+      role: user.role ?? 'member', createdAt: validText(user.createdAt) ? user.createdAt : '', ...credentials })
+  }
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
+  registeredUsers.value = users
 }
 
 function loadCurrentUser() {
@@ -278,9 +262,10 @@ function loadCurrentUser() {
 
   try {
     const parsedUser = JSON.parse(storedUser)
-    const matchingUser = registeredUsers.value.find((user) => user.id === parsedUser.id)
+    const matchingUser = registeredUsers.value.find((user) => user.id === parsedUser?.id)
 
     if (matchingUser) {
+      localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify({ id: matchingUser.id }))
       currentUser.value = matchingUser
     } else {
       localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
@@ -291,21 +276,39 @@ function loadCurrentUser() {
 }
 
 function loadSavedInterests() {
-  const storedInterests = localStorage.getItem(STORAGE_KEY)
+  savedInterests.value = readList(STORAGE_KEY).filter((item) => item && Number.isSafeInteger(item.id)
+    && (item.userId === undefined || Number.isSafeInteger(item.userId))
+    && validText(item.fullName) && validEmail(item.emailAddress)
+    && typeof item.postcode === 'string' && postcodePattern.test(item.postcode)
+    && topics.includes(item.topic) && validText(item.learningGoal) && validText(item.savedAt))
+}
 
-  if (!storedInterests) {
-    return
-  }
+function validText(value, max = Infinity, min = 1) {
+  return typeof value === 'string' && value.trim().length >= min && value.length <= max
+}
 
-  try {
-    const parsedInterests = JSON.parse(storedInterests)
+function validEmail(value) {
+  return validText(value, 254) && emailPattern.test(value.trim())
+}
 
-    if (Array.isArray(parsedInterests)) {
-      savedInterests.value = parsedInterests
-    }
-  } catch {
-    localStorage.removeItem(STORAGE_KEY)
-  }
+function contactErrors(form) {
+  const errors = {}
+  if (!validText(form.fullName, 80)) errors.fullName = 'Enter a name (1-80 characters).'
+  if (!validEmail(form.emailAddress)) errors.emailAddress = 'Enter a valid email address (up to 254 characters).'
+  return errors
+}
+
+function toHex(bytes) {
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function hashPassword(password, salt = toHex(crypto.getRandomValues(new Uint8Array(16)))) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits'])
+  const saltBytes = Uint8Array.from(salt.match(/../g), (byte) => parseInt(byte, 16))
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: saltBytes, iterations: 600000 }, key, 256,
+  )
+  return { salt, passwordHash: toHex(bits) }
 }
 
 function normalizeEmail(emailAddress) {
@@ -313,22 +316,16 @@ function normalizeEmail(emailAddress) {
 }
 
 function loadRatings() {
-  try {
-    const items = JSON.parse(localStorage.getItem(RATINGS_STORAGE_KEY) || '[]')
-    if (Array.isArray(items)) {
-      ratings.value = items.filter((rating) => rating && Number.isInteger(rating.score)
-        && rating.score >= 1 && rating.score <= 5
-        && registeredUsers.value.some((user) => user.id === rating.userId))
-    }
-  } catch {
-    localStorage.removeItem(RATINGS_STORAGE_KEY)
-  }
+  const items = readList(RATINGS_STORAGE_KEY).filter((rating) => rating && Number.isInteger(rating.score)
+    && rating.score >= 1 && rating.score <= 5 && validText(rating.comment ?? '', 100, 0)
+    && registeredUsers.value.some((user) => user.id === rating.userId))
+  ratings.value = [...new Map(items.map((rating) => [rating.userId, rating])).values()]
 }
 
 function submitRating() {
   if (!currentUser.value) return
-  const score = Number(ratingForm.score)
-  if (!Number.isInteger(score) || score < 1 || score > 5 || ratingForm.comment.length > 100) {
+  const score = ratingForm.score
+  if (!Number.isInteger(score) || score < 1 || score > 5 || !validText(ratingForm.comment, 100, 0)) {
     ratingMessage.value = 'Choose 1 to 5 stars and keep comments within 100 characters.'
     return
   }
@@ -346,6 +343,7 @@ function formattedDate() {
 }
 
 function switchAuthMode(mode) {
+  if (authBusy.value || !authReady.value) return
   authMode.value = mode
   registerAttempted.value = false
   loginAttempted.value = false
@@ -356,7 +354,8 @@ function switchAuthMode(mode) {
   }
 }
 
-function registerUser() {
+async function registerUser() {
+  if (authBusy.value || !authReady.value) return
   registerAttempted.value = true
   registerSuccessMessage.value = ''
   loginErrorMessage.value = ''
@@ -369,21 +368,31 @@ function registerUser() {
     id: Date.now(),
     fullName: registerForm.fullName.trim(),
     emailAddress: normalizeEmail(registerForm.emailAddress),
-    password: registerForm.password,
     role: registerForm.role,
     createdAt: formattedDate(),
   }
 
-  registeredUsers.value.unshift(newUser)
-  loginForm.emailAddress = newUser.emailAddress
-  loginForm.password = ''
-  loginForm.role = newUser.role
-  registerSuccessMessage.value = 'Account created. You can now log in.'
-  resetRegisterForm()
-  authMode.value = 'login'
+  authBusy.value = true
+  try {
+    Object.assign(newUser, await hashPassword(registerForm.password))
+    const users = [newUser, ...registeredUsers.value]
+    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
+    registeredUsers.value = users
+    loginForm.emailAddress = newUser.emailAddress
+    loginForm.password = ''
+    loginForm.role = newUser.role
+    registerSuccessMessage.value = 'Account created. You can now log in.'
+    resetRegisterForm()
+    authMode.value = 'login'
+  } catch {
+    loginErrorMessage.value = 'Unable to create your account. Use HTTPS or localhost and allow browser storage.'
+  } finally {
+    authBusy.value = false
+  }
 }
 
-function loginUser() {
+async function loginUser() {
+  if (authBusy.value || !authReady.value) return
   loginAttempted.value = true
   loginErrorMessage.value = ''
 
@@ -393,23 +402,30 @@ function loginUser() {
 
   const emailAddress = normalizeEmail(loginForm.emailAddress)
   const matchedUser = registeredUsers.value.find((user) => {
-    return user.emailAddress === emailAddress && user.password === loginForm.password
-      && user.role === loginForm.role
+    return user.emailAddress === emailAddress && user.role === loginForm.role
   })
 
-  if (!matchedUser) {
-    loginErrorMessage.value = 'Email, password or role is incorrect.'
-    return
+  authBusy.value = true
+  try {
+    if (!matchedUser || (await hashPassword(loginForm.password, matchedUser.salt)).passwordHash !== matchedUser.passwordHash) {
+      loginErrorMessage.value = 'Email, password or role is incorrect.'
+      return
+    }
+    localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify({ id: matchedUser.id }))
+    currentUser.value = matchedUser
+    window.location.hash = 'home'
+    updatePage()
+    registerSuccessMessage.value = ''
+    resetLoginForm()
+  } catch {
+    loginErrorMessage.value = 'Unable to log in. Use HTTPS or localhost and allow browser storage.'
+  } finally {
+    authBusy.value = false
   }
-
-  currentUser.value = matchedUser
-  window.location.hash = 'home'
-  updatePage()
-  registerSuccessMessage.value = ''
-  resetLoginForm()
 }
 
 function logoutUser() {
+  localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
   currentUser.value = null
   authMode.value = 'login'
 }
@@ -494,7 +510,7 @@ function clearSavedInterests() {
   <main v-if="!currentUser" class="auth-shell">
     <section class="container py-4 py-lg-5">
       <div class="auth-layout">
-        <section class="auth-card">
+        <fieldset class="auth-card" :disabled="authBusy || !authReady" :aria-busy="authBusy">
           <div class="auth-tabs" role="tablist" aria-label="Authentication options">
             <button
               class="auth-tab"
@@ -514,6 +530,10 @@ function clearSavedInterests() {
             </button>
           </div>
 
+          <div v-if="loginErrorMessage" class="auth-alert error" role="alert">
+            {{ loginErrorMessage }}
+          </div>
+
           <form v-if="authMode === 'login'" novalidate @submit.prevent="loginUser">
             <div class="section-heading">
               <p class="section-kicker">Welcome back</p>
@@ -524,15 +544,12 @@ function clearSavedInterests() {
               {{ registerSuccessMessage }}
             </div>
 
-            <div v-if="loginErrorMessage" class="auth-alert error">
-              {{ loginErrorMessage }}
-            </div>
-
             <div class="mb-3">
               <label for="loginEmailAddress" class="form-label">Email address</label>
               <input
                 id="loginEmailAddress"
                 v-model="loginForm.emailAddress"
+                maxlength="254"
                 class="form-control"
                 :class="{ 'is-invalid': loginAttempted && Boolean(loginErrors.emailAddress) }"
                 type="email"
@@ -548,10 +565,14 @@ function clearSavedInterests() {
 
             <div class="mb-3">
               <label for="loginRole" class="form-label">Role</label>
-              <select id="loginRole" v-model="loginForm.role" class="form-select">
+              <select id="loginRole" v-model="loginForm.role" class="form-select"
+                :aria-invalid="loginAttempted && Boolean(loginErrors.role)" aria-describedby="loginRoleFeedback">
                 <option value="member">Member</option>
                 <option value="admin">Admin</option>
               </select>
+              <div v-if="loginAttempted && loginErrors.role" id="loginRoleFeedback" class="invalid-feedback d-block">
+                {{ loginErrors.role }}
+              </div>
             </div>
 
             <div class="mb-4">
@@ -573,7 +594,7 @@ function clearSavedInterests() {
             </div>
 
             <div class="d-grid gap-2">
-              <button class="btn btn-climate px-4" type="submit">Login</button>
+              <button class="btn btn-climate px-4" type="submit">{{ authBusy ? 'Please wait...' : 'Login' }}</button>
               <button class="btn btn-outline-secondary px-4" type="button" @click="resetLoginForm">
                 Reset
               </button>
@@ -591,6 +612,7 @@ function clearSavedInterests() {
               <input
                 id="registerFullName"
                 v-model="registerForm.fullName"
+                maxlength="80"
                 class="form-control"
                 :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.fullName) }"
                 type="text"
@@ -609,6 +631,7 @@ function clearSavedInterests() {
               <input
                 id="registerEmailAddress"
                 v-model="registerForm.emailAddress"
+                maxlength="254"
                 class="form-control"
                 :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.emailAddress) }"
                 type="email"
@@ -624,10 +647,14 @@ function clearSavedInterests() {
 
             <div class="mb-3">
               <label for="registerRole" class="form-label">Role</label>
-              <select id="registerRole" v-model="registerForm.role" class="form-select">
+              <select id="registerRole" v-model="registerForm.role" class="form-select"
+                :aria-invalid="registerAttempted && Boolean(registerErrors.role)" aria-describedby="registerRoleFeedback">
                 <option value="member">Member</option>
                 <option value="admin">Admin</option>
               </select>
+              <div v-if="registerAttempted && registerErrors.role" id="registerRoleFeedback" class="invalid-feedback d-block">
+                {{ registerErrors.role }}
+              </div>
             </div>
 
             <div class="mb-3">
@@ -635,6 +662,7 @@ function clearSavedInterests() {
               <input
                 id="registerPassword"
                 v-model="registerForm.password"
+                maxlength="128"
                 class="form-control"
                 :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.password) }"
                 type="password"
@@ -653,6 +681,7 @@ function clearSavedInterests() {
               <input
                 id="registerConfirmPassword"
                 v-model="registerForm.confirmPassword"
+                maxlength="128"
                 class="form-control"
                 :class="{ 'is-invalid': registerAttempted && Boolean(registerErrors.confirmPassword) }"
                 type="password"
@@ -667,7 +696,7 @@ function clearSavedInterests() {
             </div>
 
             <div class="d-grid gap-2">
-              <button class="btn btn-climate px-4" type="submit">Create account</button>
+              <button class="btn btn-climate px-4" type="submit">{{ authBusy ? 'Please wait...' : 'Create account' }}</button>
               <button
                 class="btn btn-outline-secondary px-4"
                 type="button"
@@ -677,7 +706,7 @@ function clearSavedInterests() {
               </button>
             </div>
           </form>
-        </section>
+        </fieldset>
       </div>
     </section>
   </main>
@@ -814,6 +843,7 @@ function clearSavedInterests() {
               <input
                 id="fullName"
                 v-model="interestForm.fullName"
+                maxlength="80"
                 class="form-control"
                 :class="fieldState('fullName')"
                 type="text"
@@ -833,6 +863,7 @@ function clearSavedInterests() {
               <input
                 id="emailAddress"
                 v-model="interestForm.emailAddress"
+                maxlength="254"
                 class="form-control"
                 :class="fieldState('emailAddress')"
                 type="email"
@@ -896,6 +927,7 @@ function clearSavedInterests() {
               <textarea
                 id="learningGoal"
                 v-model="interestForm.learningGoal"
+                maxlength="500"
                 class="form-control"
                 :class="fieldState('learningGoal')"
                 rows="4"
