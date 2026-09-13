@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 const STORAGE_KEY = 'climatewise-learning-interests'
 const USERS_STORAGE_KEY = 'climatewise-users'
 const CURRENT_USER_STORAGE_KEY = 'climatewise-current-user'
+const RATINGS_STORAGE_KEY = 'climatewise-ratings'
 const MIN_PASSWORD_LENGTH = 6
 
 const learningResources = [
@@ -45,6 +46,15 @@ const topics = [
 
 const registeredUsers = ref([])
 const currentUser = ref(null)
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const currentPage = ref(window.location.hash)
+const ratings = ref([])
+const ratingForm = reactive({ score: '', comment: '' })
+const ratingMessage = ref('')
+const myRating = computed(() => ratings.value.find((rating) => rating.userId === currentUser.value?.id))
+const averageRating = computed(() => ratings.value.length
+  ? (ratings.value.reduce((sum, rating) => sum + rating.score, 0) / ratings.value.length).toFixed(1)
+  : null)
 const authMode = ref('login')
 const registerAttempted = ref(false)
 const loginAttempted = ref(false)
@@ -56,11 +66,13 @@ const registerForm = reactive({
   emailAddress: '',
   password: '',
   confirmPassword: '',
+  role: 'member',
 })
 
 const loginForm = reactive({
   emailAddress: '',
   password: '',
+  role: 'member',
 })
 
 const interestForm = reactive({
@@ -177,13 +189,36 @@ const formErrors = computed(() => {
 
 const formIsValid = computed(() => Object.keys(formErrors.value).length === 0)
 
-const savedInterestCount = computed(() => savedInterests.value.length)
+const visibleInterests = computed(() => {
+  if (!currentUser.value) return []
+  if (isAdmin.value && currentPage.value === '#admin') return savedInterests.value
+  return savedInterests.value.filter((interest) => interest.userId === currentUser.value.id
+    || (!interest.userId && normalizeEmail(interest.emailAddress) === currentUser.value.emailAddress))
+})
+const savedInterestCount = computed(() => visibleInterests.value.length)
 
 onMounted(() => {
   loadUsers()
   loadCurrentUser()
   loadSavedInterests()
+  loadRatings()
+  window.addEventListener('hashchange', updatePage)
 })
+
+onUnmounted(() => window.removeEventListener('hashchange', updatePage))
+
+function updatePage() {
+  currentPage.value = window.location.hash
+}
+
+watch(currentUser, () => {
+  ratingForm.score = myRating.value?.score ?? ''
+  ratingForm.comment = myRating.value?.comment ?? ''
+  ratingMessage.value = ''
+  resetInterestForm()
+})
+
+watch(ratings, (items) => localStorage.setItem(RATINGS_STORAGE_KEY, JSON.stringify(items)))
 
 watch(
   registeredUsers,
@@ -225,7 +260,9 @@ function loadUsers() {
     const parsedUsers = JSON.parse(storedUsers)
 
     if (Array.isArray(parsedUsers)) {
-      registeredUsers.value = parsedUsers
+      registeredUsers.value = parsedUsers.map((user) => ({ ...user,
+        role: user.role === 'admin' ? 'admin' : 'member',
+      }))
     }
   } catch {
     localStorage.removeItem(USERS_STORAGE_KEY)
@@ -275,6 +312,31 @@ function normalizeEmail(emailAddress) {
   return emailAddress.trim().toLowerCase()
 }
 
+function loadRatings() {
+  try {
+    const items = JSON.parse(localStorage.getItem(RATINGS_STORAGE_KEY) || '[]')
+    if (Array.isArray(items)) {
+      ratings.value = items.filter((rating) => rating && Number.isInteger(rating.score)
+        && rating.score >= 1 && rating.score <= 5
+        && registeredUsers.value.some((user) => user.id === rating.userId))
+    }
+  } catch {
+    localStorage.removeItem(RATINGS_STORAGE_KEY)
+  }
+}
+
+function submitRating() {
+  if (!currentUser.value) return
+  const score = Number(ratingForm.score)
+  if (!Number.isInteger(score) || score < 1 || score > 5 || ratingForm.comment.length > 100) {
+    ratingMessage.value = 'Choose 1 to 5 stars and keep comments within 100 characters.'
+    return
+  }
+  const rating = { userId: currentUser.value.id, score, comment: ratingForm.comment.trim() }
+  ratings.value = [...ratings.value.filter((item) => item.userId !== rating.userId), rating]
+  ratingMessage.value = 'Your rating has been saved.'
+}
+
 function formattedDate() {
   return new Date().toLocaleDateString('en-AU', {
     day: '2-digit',
@@ -308,12 +370,14 @@ function registerUser() {
     fullName: registerForm.fullName.trim(),
     emailAddress: normalizeEmail(registerForm.emailAddress),
     password: registerForm.password,
+    role: registerForm.role,
     createdAt: formattedDate(),
   }
 
   registeredUsers.value.unshift(newUser)
   loginForm.emailAddress = newUser.emailAddress
   loginForm.password = ''
+  loginForm.role = newUser.role
   registerSuccessMessage.value = 'Account created. You can now log in.'
   resetRegisterForm()
   authMode.value = 'login'
@@ -330,14 +394,17 @@ function loginUser() {
   const emailAddress = normalizeEmail(loginForm.emailAddress)
   const matchedUser = registeredUsers.value.find((user) => {
     return user.emailAddress === emailAddress && user.password === loginForm.password
+      && user.role === loginForm.role
   })
 
   if (!matchedUser) {
-    loginErrorMessage.value = 'Email or password is incorrect.'
+    loginErrorMessage.value = 'Email, password or role is incorrect.'
     return
   }
 
   currentUser.value = matchedUser
+  window.location.hash = 'home'
+  updatePage()
   registerSuccessMessage.value = ''
   resetLoginForm()
 }
@@ -352,12 +419,14 @@ function resetRegisterForm() {
   registerForm.emailAddress = ''
   registerForm.password = ''
   registerForm.confirmPassword = ''
+  registerForm.role = 'member'
   registerAttempted.value = false
 }
 
 function resetLoginForm() {
   loginForm.emailAddress = ''
   loginForm.password = ''
+  loginForm.role = 'member'
   loginAttempted.value = false
   loginErrorMessage.value = ''
 }
@@ -379,6 +448,7 @@ function fieldState(field) {
 }
 
 function saveInterest() {
+  if (!currentUser.value) return
   submitAttempted.value = true
   Object.keys(touched).forEach((field) => {
     touched[field] = true
@@ -390,6 +460,7 @@ function saveInterest() {
 
   savedInterests.value.unshift({
     id: Date.now(),
+    userId: currentUser.value.id,
     fullName: interestForm.fullName.trim(),
     emailAddress: interestForm.emailAddress.trim(),
     postcode: interestForm.postcode.trim(),
@@ -414,6 +485,7 @@ function resetInterestForm() {
 }
 
 function clearSavedInterests() {
+  if (!isAdmin.value) return
   savedInterests.value = []
 }
 </script>
@@ -422,27 +494,6 @@ function clearSavedInterests() {
   <main v-if="!currentUser" class="auth-shell">
     <section class="container py-4 py-lg-5">
       <div class="auth-layout">
-        <section class="auth-intro">
-          <div class="brand-mark mb-3" aria-hidden="true">CW</div>
-          <p class="section-kicker">ClimateWise Melbourne</p>
-          <h1 class="display-title">Sign in to access the learning hub</h1>
-          <p class="intro-copy">
-            Register a local account or log in to continue to the existing ClimateWise
-            Melbourne application.
-          </p>
-
-          <div class="auth-points">
-            <div>
-              <span>Multiple users</span>
-              <strong>{{ registeredUsers.length }}</strong>
-            </div>
-            <div>
-              <span>Local records</span>
-              <strong>{{ savedInterestCount }}</strong>
-            </div>
-          </div>
-        </section>
-
         <section class="auth-card">
           <div class="auth-tabs" role="tablist" aria-label="Authentication options">
             <button
@@ -493,6 +544,14 @@ function clearSavedInterests() {
               <div id="loginEmailAddressFeedback" class="invalid-feedback">
                 {{ loginErrors.emailAddress }}
               </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="loginRole" class="form-label">Role</label>
+              <select id="loginRole" v-model="loginForm.role" class="form-select">
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
             </div>
 
             <div class="mb-4">
@@ -561,6 +620,14 @@ function clearSavedInterests() {
               <div id="registerEmailAddressFeedback" class="invalid-feedback">
                 {{ registerErrors.emailAddress }}
               </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="registerRole" class="form-label">Role</label>
+              <select id="registerRole" v-model="registerForm.role" class="form-select">
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
             </div>
 
             <div class="mb-3">
@@ -633,6 +700,7 @@ function clearSavedInterests() {
             <div class="account-summary">
               <span>Signed in as</span>
               <strong>{{ currentUser.fullName }}</strong>
+              <span>{{ isAdmin ? 'Admin' : 'Member' }}</span>
             </div>
             <button class="btn btn-climate btn-sm" type="button" @click="logoutUser">
               Logout
@@ -643,7 +711,12 @@ function clearSavedInterests() {
     </header>
 
     <section class="container py-4 py-lg-5">
-      <div class="row g-4 align-items-stretch">
+      <nav class="d-flex gap-3 mb-4" aria-label="Main navigation">
+        <a href="#home" :aria-current="currentPage !== '#admin' ? 'page' : null">Learning hub</a>
+        <a v-if="isAdmin" href="#admin" :aria-current="currentPage === '#admin' ? 'page' : null">Admin</a>
+      </nav>
+      <p v-if="currentPage === '#admin' && !isAdmin" role="alert">Access denied. Admin only.</p>
+      <div v-if="currentPage !== '#admin'" class="row g-4 align-items-stretch">
         <div class="col-12 col-xl-5">
           <section class="intro-panel h-100">
             <p class="section-kicker">Climate literacy hub</p>
@@ -702,7 +775,34 @@ function clearSavedInterests() {
       </div>
 
       <div class="row g-4 mt-1">
-        <div class="col-12">
+        <div v-if="currentPage !== '#admin'" class="col-12">
+          <section class="border-top pt-4" aria-labelledby="ratingHeading">
+            <h2 id="ratingHeading" class="h4 fw-bold">Rate ClimateWise</h2>
+            <p aria-live="polite">
+              {{ averageRating ? `${averageRating} / 5` : 'No ratings yet.' }}
+              <span v-if="ratings.length">({{ ratings.length }} {{ ratings.length === 1 ? 'rating' : 'ratings' }})</span>
+            </p>
+            <form class="row g-3 align-items-end" novalidate @submit.prevent="submitRating">
+              <div class="col-12 col-sm-3">
+                <label for="ratingScore" class="form-label">Your rating</label>
+                <select id="ratingScore" v-model.number="ratingForm.score" class="form-select" required>
+                  <option disabled value="">Choose stars</option>
+                  <option v-for="score in 5" :key="score" :value="score">{{ score }} / 5</option>
+                </select>
+              </div>
+              <div class="col-12 col-sm-6">
+                <label for="ratingComment" class="form-label">Comment (optional)</label>
+                <input id="ratingComment" v-model="ratingForm.comment" class="form-control" maxlength="100">
+              </div>
+              <div class="col-12 col-sm-3">
+                <button class="btn btn-climate w-100" type="submit">{{ myRating ? 'Update rating' : 'Submit rating' }}</button>
+              </div>
+            </form>
+            <p class="small mt-2 mb-0" role="status">{{ ratingMessage }}</p>
+          </section>
+        </div>
+
+        <div v-if="currentPage !== '#admin'" class="col-12">
           <form class="form-panel" novalidate @submit.prevent="saveInterest">
             <div class="section-heading">
               <p class="section-kicker">Community interest form</p>
@@ -824,17 +924,18 @@ function clearSavedInterests() {
           </form>
         </div>
 
-        <div class="col-12">
+        <div v-if="currentPage !== '#admin' || isAdmin" class="col-12">
           <section class="records-panel">
             <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
               <div>
-                <p class="section-kicker">Local storage data</p>
-                <h2 class="h4 fw-bold mb-0">Saved community interests</h2>
+                <p class="section-kicker">{{ currentPage === '#admin' ? 'Admin' : 'Learning interests' }}</p>
+                <h2 class="h4 fw-bold mb-0">{{ currentPage === '#admin' ? 'Saved community interests' : 'My learning interests' }}</h2>
               </div>
 
               <div class="records-actions">
                 <span class="record-count">{{ savedInterestCount }} saved</span>
                 <button
+                  v-if="isAdmin && currentPage === '#admin'"
                   class="btn btn-outline-secondary btn-sm"
                   type="button"
                   :disabled="savedInterestCount === 0"
@@ -863,7 +964,7 @@ function clearSavedInterests() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="interest in savedInterests" :key="interest.id">
+                  <tr v-for="interest in visibleInterests" :key="interest.id">
                     <td>{{ interest.fullName }}</td>
                     <td>{{ interest.emailAddress }}</td>
                     <td>{{ interest.postcode }}</td>
